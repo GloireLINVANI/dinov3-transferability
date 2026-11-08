@@ -1,0 +1,15 @@
+torch
+torchvision
+torchmetrics
+numpy
+pandas
+Pillow
+scipy
+scikit-learn
+h5py
+datasets
+matplotlib
+seaborn
+tqdm
+timm
+termcolor
