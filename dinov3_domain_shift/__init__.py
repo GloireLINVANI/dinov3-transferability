@@ -1,9 +1,4 @@
-"""
-DINOv3 Domain Shift Evaluation
-==============================
-Evaluation of DINOv3 (pretrained on web data) dense features on specialized visual domains
-to investigate whether transfer with linear probing is enough.
-"""
+"""Evaluation of DINOv3's web-pretrained dense features on specialized visual domains."""
 
 from .augmentations import (
     PatchCamelyonAugmentation,

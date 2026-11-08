@@ -1,8 +1,4 @@
-"""
-Dataset Downloading and Loading Utilities
-==========================================
-Handles DeepGlobe, PatchCamelyon, and Coralscapes datasets
-"""
+"""Download and loading utilities for the PatchCamelyon, DeepGlobe, and Coralscapes datasets."""
 
 import gzip
 import shutil
@@ -19,7 +15,6 @@ from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 
-# Import dataset-specific augmentations
 from augmentations import (
     get_patchcamelyon_transforms,
     get_deepglobe_transforms,
@@ -29,13 +24,7 @@ from augmentations import (
 )
 
 
-# =======================
-# Download Utilities
-# =======================
-
 class DownloadProgressBar(tqdm):
-    """Progress bar for downloads"""
-
     def update_to(self, b=1, bsize=1, tsize=None):
         if tsize is not None:
             self.total = tsize
@@ -43,7 +32,6 @@ class DownloadProgressBar(tqdm):
 
 
 def download_file(url: str, output_path: Path, desc: str = None):
-    """Download a file from a URL"""
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -56,10 +44,6 @@ def download_file(url: str, output_path: Path, desc: str = None):
         urllib.request.urlretrieve(url, output_path, reporthook=t.update_to)
 
 
-# =======================
-# PatchCamelyon Dataset
-# =======================
-
 PCAM_URLS = {
     'train_x': 'https://zenodo.org/records/2546921/files/camelyonpatch_level_2_split_train_x.h5.gz',
     'train_y': 'https://zenodo.org/records/2546921/files/camelyonpatch_level_2_split_train_y.h5.gz',
@@ -71,7 +55,6 @@ PCAM_URLS = {
 
 
 def download_patchcamelyon(data_root: Path):
-    """Download PatchCamelyon dataset"""
     pcam_dir = Path(data_root) / "patchcamelyon"
     pcam_dir.mkdir(parents=True, exist_ok=True)
 
@@ -97,8 +80,6 @@ def download_patchcamelyon(data_root: Path):
 
 
 class PatchCamelyonDataset(Dataset):
-    """PatchCamelyon dataset for histopathology classification"""
-
     def __init__(
             self,
             data_root: Path,
@@ -111,11 +92,9 @@ class PatchCamelyonDataset(Dataset):
         self.transform = transform
         self.image_size = image_size
 
-        # Map split names
         split_map = {"train": "train", "val": "valid", "test": "test"}
         h5_split = split_map.get(split, split)
 
-        # Load data
         x_path = self.data_root / f"{h5_split}_x.h5"
         y_path = self.data_root / f"{h5_split}_y.h5"
 
@@ -131,7 +110,6 @@ class PatchCamelyonDataset(Dataset):
         image = Image.fromarray(self.images[idx])
         label = int(self.labels[idx])
 
-        # Resize
         image = TF.resize(image, (self.image_size, self.image_size))
 
         if self.transform:
@@ -140,21 +118,6 @@ class PatchCamelyonDataset(Dataset):
         return image, label
 
 
-# ===============================
-# DeepGlobe Land Cover Dataset
-# ===============================
-
-# DEEPGLOBE_CLASSES = {
-#     0: "urban_land",
-#     1: "agriculture_land",
-#     2: "rangeland",
-#     3: "forest_land",
-#     4: "water",
-#     5: "barren_land",
-#     6: "unknown"
-# }
-
-# RGB values for each class
 DEEPGLOBE_COLORS = {
     (0, 255, 255): 0,  # urban_land - cyan
     (255, 255, 0): 1,  # agriculture_land - yellow
@@ -167,9 +130,6 @@ DEEPGLOBE_COLORS = {
 
 
 def download_deepglobe(data_root: Path):
-    """
-    Download DeepGlobe Land Cover dataset
-    """
     deepglobe_dir = Path(data_root) / "deepglobe"
     deepglobe_dir.mkdir(parents=True, exist_ok=True)
 
@@ -178,7 +138,6 @@ def download_deepglobe(data_root: Path):
         print("DeepGlobe dataset found.")
         return True
 
-    # Try Kaggle download if kaggle is installed
     try:
         import kaggle
         print("Attempting Kaggle download...")
@@ -198,7 +157,6 @@ def download_deepglobe(data_root: Path):
 
 
 def rgb_to_class(mask_rgb: np.ndarray) -> np.ndarray:
-    """Convert RGB mask to class indices"""
     mask_class = np.zeros(mask_rgb.shape[:2], dtype=np.int64)
 
     for rgb, class_idx in DEEPGLOBE_COLORS.items():
@@ -209,8 +167,6 @@ def rgb_to_class(mask_rgb: np.ndarray) -> np.ndarray:
 
 
 class DeepGlobeDataset(Dataset):
-    """DeepGlobe Land Cover Classification dataset"""
-
     def __init__(
             self,
             data_root: Path,
@@ -225,11 +181,10 @@ class DeepGlobeDataset(Dataset):
         self.joint_transform = joint_transform
         self.image_size = image_size
 
-        # Find all images
         train_dir = self.data_root / "train"
         all_images = sorted(train_dir.glob("*_sat.jpg"))
 
-        # Create train/val/test splits (803 images total)
+        # 803 labeled images in total
         np.random.seed(42)
         indices = np.random.permutation(len(all_images))
 
@@ -240,7 +195,7 @@ class DeepGlobeDataset(Dataset):
             self.image_paths = [all_images[i] for i in indices[:n_train]]
         elif split == "val":
             self.image_paths = [all_images[i] for i in indices[n_train:n_train + n_val]]
-        else:  # test
+        else:
             self.image_paths = [all_images[i] for i in indices[n_train + n_val:]]
 
     def __len__(self):
@@ -250,24 +205,19 @@ class DeepGlobeDataset(Dataset):
         img_path = self.image_paths[idx]
         mask_path = str(img_path).replace("_sat.jpg", "_mask.png")
 
-        # Load image and mask
         image = Image.open(img_path).convert("RGB")
         mask_rgb = np.array(Image.open(mask_path).convert("RGB"))
 
-        # Convert RGB mask to class indices
         mask = rgb_to_class(mask_rgb)
         mask = Image.fromarray(mask.astype(np.uint8))
 
-        # Resize
         image = TF.resize(image, (self.image_size, self.image_size))
         mask = TF.resize(mask, (self.image_size, self.image_size),
                          interpolation=T.InterpolationMode.NEAREST)
 
-        # Apply joint geometric augmentations (same to image and mask)
         if self.joint_transform is not None:
             image, mask = self.joint_transform(image, mask)
 
-        # Apply image-only transforms (color augmentation, normalization)
         if self.transform:
             image = self.transform(image)
 
@@ -276,21 +226,11 @@ class DeepGlobeDataset(Dataset):
         return image, mask
 
 
-# ============================================================
-# Coralscapes Dataset (Underwater Coral Reef Segmentation)
-# ============================================================
-
 # Coralscapes actually has 40 classes (labels 0-39 inclusive)
 CORALSCAPES_NUM_CLASSES = 40
 
 
-# CORALSCAPES_CLASSES = []
-
-
 def download_coralscapes(data_root: Path):
-    """
-    Download Coralscapes dataset from Hugging Face
-    """
     coralscapes_dir = Path(data_root) / "coralscapes"
     coralscapes_dir.mkdir(parents=True, exist_ok=True)
 
@@ -319,18 +259,6 @@ def download_coralscapes(data_root: Path):
 
 
 class CoralscapesDataset(Dataset):
-    """
-    Coralscapes coral reef semantic segmentation dataset
-    
-    The first general-purpose dense semantic segmentation dataset for coral reefs.
-    - 2075 images at 2048x1024px resolution
-    - 39 benthic classes
-    - High domain shift (underwater coral reef imagery)
-    
-    Reference: Sauder et al., "The Coralscapes Dataset: Semantic Scene 
-    Understanding in Coral Reefs"
-    """
-
     def __init__(
             self,
             data_root: Path,
@@ -349,11 +277,9 @@ class CoralscapesDataset(Dataset):
         self._load_dataset()
 
     def _load_dataset(self):
-        """Load dataset from Hugging Face cache or download"""
         try:
             from datasets import load_from_disk, load_dataset
 
-            # Check if cached version exists
             cache_path = self.data_root / "dataset"
             if cache_path.exists():
                 full_dataset = load_from_disk(str(cache_path))
@@ -365,7 +291,6 @@ class CoralscapesDataset(Dataset):
                 )
                 full_dataset.save_to_disk(str(cache_path))
 
-            # Map split names (Coralscapes uses train/validation/test)
             split_map = {"train": "train", "val": "validation", "test": "test"}
             hf_split = split_map.get(self.split, self.split)
 
@@ -384,11 +309,9 @@ class CoralscapesDataset(Dataset):
     def __getitem__(self, idx):
         item = self.dataset[idx]
 
-        # Get image and label from HF dataset
         image = item["image"]
         mask = item["label"]
 
-        # Convert to PIL if needed
         if not isinstance(image, Image.Image):
             image = Image.fromarray(np.array(image)).convert("RGB")
         else:
@@ -402,11 +325,9 @@ class CoralscapesDataset(Dataset):
         mask = TF.resize(mask, self.image_size,
                          interpolation=T.InterpolationMode.NEAREST)
 
-        # Apply joint geometric augmentations (same to image and mask)
         if self.joint_transform is not None:
             image, mask = self.joint_transform(image, mask)
 
-        # Apply image-only transforms (underwater color augmentation, normalization)
         if self.transform:
             image = self.transform(image)
 
@@ -415,10 +336,6 @@ class CoralscapesDataset(Dataset):
         return image, mask
 
 
-# =====================
-# DataLoader Factory
-# =====================
-
 def create_dataloaders(
         dataset_name: str,
         data_root: Path,
@@ -426,14 +343,11 @@ def create_dataloaders(
         num_workers: int = 4,
         image_size: int | Tuple[int, int] | None = None,
 ) -> Dict[str, DataLoader]:
-    """
-    Create dataloaders for a given dataset with domain-specific augmentations.
-    """
+    """Create the dataloaders for a dataset, with its domain-specific augmentations."""
 
     data_root = Path(data_root)
 
     if dataset_name == "patchcamelyon":
-        # We use histopathology-specific augmentations
         train_transform = get_patchcamelyon_transforms(image_size, is_train=True)
         eval_transform = get_patchcamelyon_transforms(image_size, is_train=False)
 
@@ -448,10 +362,7 @@ def create_dataloaders(
         )
 
     elif dataset_name == "deepglobe":
-        # We use satellite-specific augmentations
-        # Joint transform for geometric augmentations (applied to both image and mask)
         train_joint_transform = get_deepglobe_joint_transforms(image_size)
-        # Image-only transform for color augmentations and normalization
         train_transform = get_deepglobe_transforms(image_size, is_train=True)
         eval_transform = get_deepglobe_transforms(image_size, is_train=False)
 
@@ -475,10 +386,7 @@ def create_dataloaders(
         )
 
     elif dataset_name == "coralscapes":
-        # We use underwater-specific augmentations
-        # Joint transform for geometric augmentations
         train_joint_transform = get_coralscapes_joint_transforms(image_size)
-        # Image-only transform for underwater color augmentations and normalization
         train_transform = get_coralscapes_transforms(image_size, is_train=True)
         eval_transform = get_coralscapes_transforms(image_size, is_train=False)
 
@@ -524,12 +432,7 @@ def create_dataloaders(
     }
 
 
-# ========================
-# Main Download Function
-# ========================
-
 def download_all_datasets(data_root: Path):
-    """Download all required datasets"""
     data_root = Path(data_root)
     data_root.mkdir(parents=True, exist_ok=True)
 
@@ -554,4 +457,4 @@ def download_all_datasets(data_root: Path):
 
 
 if __name__ == "__main__":
-    download_all_datasets(Path("/Users/gloirelinvani/Downloads/data"))
+    download_all_datasets(Path("./data"))

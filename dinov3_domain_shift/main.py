@@ -1,8 +1,4 @@
-"""
-Main Experiment Runner
-======================
-Run experiments for DINOv3 domain shift project
-"""
+"""Command-line runner for the DINOv3 domain shift experiments."""
 
 import argparse
 import json
@@ -40,9 +36,6 @@ from visualization import (
     compare_segmentation_maps,
 )
 
-# ==========================
-# Experiment Configuration
-# ==========================
 
 EXPERIMENTS = {
     "patchcamelyon": {
@@ -51,7 +44,7 @@ EXPERIMENTS = {
         "batch_size": 64,
         "epochs": 30,
         "image_size": None,  # We use the initial 96x96 size
-        "image_size_visualizations": 98,  # for visualization
+        "image_size_visualizations": 98,
         "learning_rate": 1e-3,
         "lora_learning_rate": 1e-4,
     },
@@ -60,8 +53,8 @@ EXPERIMENTS = {
         "num_classes": 7,
         "batch_size": 8,
         "epochs": 50,
-        "image_size": 512,  # or 896, training image size
-        "image_size_visualizations": 512,  # for visualization
+        "image_size": 512,
+        "image_size_visualizations": 512,
         "learning_rate": 1e-3,
         "lora_learning_rate": 1e-4,
     },
@@ -70,17 +63,13 @@ EXPERIMENTS = {
         "num_classes": CORALSCAPES_NUM_CLASSES,
         "batch_size": 8,
         "epochs": 50,
-        "image_size": (512, 1024),  # (256, 512) # height, width
-        "image_size_visualizations": (512, 1024),  # for visualization
+        "image_size": (512, 1024),  # height, width
+        "image_size_visualizations": (512, 1024),
         "learning_rate": 1e-3,
         "lora_learning_rate": 1e-4,
     },
 }
 
-
-# =============================
-# Main Experiment Functions
-# =============================
 
 def run_experiment(
         dataset_name: str,
@@ -103,33 +92,7 @@ def run_experiment(
         weights: str = '',
         repo_dir: str = ''
 ) -> Dict:
-    """
-    Run a single experiment
-    
-    Args:
-        dataset_name: "patchcamelyon", "deepglobe", or "coralscapes"
-        model_type: "dinov3"
-        freeze_backbone: Whether to freeze the backbone during training
-        use_lora: Whether to use LoRA fine-tuning,
-        ce_weight: Weight for cross-entropy loss
-        jaccard_weight: Weight for Jaccard loss
-        dice_weight: Weight for Dice loss
-        ignore_index: Index to ignore in segmentation loss
-        data_root: Path to data directory
-        output_dir: Path to output directory
-        device: Device for computation
-        seed: Random seed
-        early_stopping_patience: Number of epochs without improvement before early stopping
-        early_stopping_min_delta: Minimum change in validation metric to qualify as an improvement
-        resume_training: Whether to resume training from last checkpoint if available
-        checkpoint_path: Path to checkpoint to resume from
-        epochs_resume_training: Target total number of epochs (including previous training) when resuming training
-        weights: Path to frozen backbone weights for DINOv3
-        repo_dir: Path to the repository directory for DINOv3 code
-    
-    Returns:
-        Dictionary with experiment results
-    """
+    """Train, or resume training of, one model on one dataset, and return its results."""
     torch.manual_seed(seed)
     np.random.seed(seed)
 
@@ -159,7 +122,6 @@ def run_experiment(
         image_size=exp_config["image_size"],
     )
 
-    # LoRA configuration
     lora_config = None
     if use_lora:
         lora_config = {
@@ -169,7 +131,6 @@ def run_experiment(
             "target_modules": ["qkv", "proj", "fc1", "fc2"],
         }
 
-    # Create model
     model = create_model(
         model_type=model_type,
         task=exp_config["task"],
@@ -182,7 +143,6 @@ def run_experiment(
         repo_dir=repo_dir
     )
 
-    # Print model info
     param_counts = count_parameters(model)
     print(f"\nModel Parameters:")
     print(f"  Total: {param_counts['total']}")
@@ -190,7 +150,6 @@ def run_experiment(
     print(f"  Frozen: {param_counts['frozen']}")
     print(f"  Trainable %: {param_counts['trainable_pct']:.2f}%\n")
 
-    # Create trainer
     trainer = Trainer(
         model=model,
         train_loader=dataloaders["train"],
@@ -213,17 +172,13 @@ def run_experiment(
     )
 
     if resume_training and checkpoint_path is not None and checkpoint_path.exists():
-        # Resume training from checkpoint
-        # retrieve experiment directory from checkpoint path
         print(f"Resuming training from checkpoint: {checkpoint_path}")
         exp_dir = checkpoint_path.parent
         trainer.output_dir = exp_dir
         history = trainer.resume_training(checkpoint_path=checkpoint_path, total_epochs=epochs_resume_training)
     else:
-        # Train from scratch
         history = trainer.train()
 
-    # Save experiment config
     exp_summary = {
         "dataset": dataset_name,
         "model_type": model_type,
@@ -259,16 +214,12 @@ def run_all_experiments(
         weights: str = '',
         repo_dir: str = ''
 ) -> Dict[str, Any]:
-    """
-    Run all experiments: We only train DINOv3, with and without LoRA
-    
-    """
+    """Train DINOv3 with and without LoRA on each dataset."""
     results = {}
 
     datasets = ["patchcamelyon", "deepglobe", "coralscapes"]
 
     for dataset in datasets:
-        # DINOv3 without LoRA fine-tuning
         result = run_experiment(
             dataset_name=dataset,
             model_type="dinov3",
@@ -289,7 +240,6 @@ def run_all_experiments(
         )
         results[f"{dataset}_dinov3_frozen"] = result
 
-        # DINOv3 with LoRA fine-tuning
         result = run_experiment(
             dataset_name=dataset,
             model_type="dinov3",
@@ -310,7 +260,6 @@ def run_all_experiments(
         )
         results[f"{dataset}_dinov3_lora"] = result
 
-    # Save combined results
     results_path = Path(output_dir) / "all_results.json"
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
@@ -323,10 +272,6 @@ def run_all_experiments(
     return results
 
 
-# =============================
-# Visualization Functions
-# =============================
-
 def run_feature_visualization(
         data_root: Path = Path("./data"),
         output_dir: Path = Path("./visualizations"),
@@ -336,19 +281,7 @@ def run_feature_visualization(
         repo_dir: str = '',
         seed: int = 42
 ) -> None:
-    """
-    Run feature visualization comparing DINOv2 and DINOv3
-    Creates PCA and cosine similarity visualizations
-
-    Args:
-        data_root: Path to data directory
-        output_dir: Path to output directory
-        device: Device for computation
-        num_samples: Number of samples to visualize
-        weights: Path to frozen backbone weights
-        repo_dir: Path to the repository directory for DINOv3 code
-        seed: Random seed for reproducible sample selection
-    """
+    """Compare DINOv2 and DINOv3 features with PCA and cosine similarity visualizations."""
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -357,7 +290,6 @@ def run_feature_visualization(
     print("Running Feature Visualization")
     print(f"{'=' * 60}\n")
 
-    # Load models
     print("Loading DINOv2...")
     dinov2 = load_dinov2("dinov2_vitl14")
     dinov2 = dinov2.to(device)
@@ -372,7 +304,6 @@ def run_feature_visualization(
     num_layers = {"DINOv2": 24, "DINOv3": 24}
     patch_sizes = {"DINOv2": 14, "DINOv3": 16}
 
-    # Get sample images from each dataset
     datasets_to_visualize = {
         "patchcamelyon": {
             "kwargs": {"split": "test", "image_size": EXPERIMENTS["patchcamelyon"]["image_size_visualizations"],
@@ -404,17 +335,14 @@ def run_feature_visualization(
                 **dataset_config["kwargs"],
             )
 
-            # Randomly select indices
             np.random.seed(seed)
             num_to_sample = min(num_samples, len(dataset))
             random_indices = np.random.choice(len(dataset), size=num_to_sample, replace=False)
 
-            # Collect all images first
             images = []
             for dataset_idx in random_indices:
                 image, _ = dataset[int(dataset_idx)]
 
-                # Convert tensor to PIL if needed
                 if isinstance(image, torch.Tensor):
                     from visualization import denormalize_image
                     image = denormalize_image(image)
@@ -427,7 +355,6 @@ def run_feature_visualization(
             # For Coralscapes, we save each image separately due to aspect ratio
             if dataset_name == "coralscapes":
                 for idx, image in enumerate(images):
-                    # PCA comparison - single image
                     fig = compare_models_pca(
                         models=models,
                         images=image,
@@ -441,7 +368,6 @@ def run_feature_visualization(
                     )
                     plt.close(fig)
 
-                    # Cosine similarity comparison - single image
                     fig = compare_models_cosine_similarity(
                         models=models,
                         images=image,
@@ -456,8 +382,6 @@ def run_feature_visualization(
                     )
                     plt.close(fig)
             else:
-                # For other datasets, we combine all images in one PDF
-                # PCA comparison
                 fig = compare_models_pca(
                     models=models,
                     images=images,
@@ -470,7 +394,6 @@ def run_feature_visualization(
                 )
                 plt.close(fig)
 
-                # Cosine similarity comparison
                 fig = compare_models_cosine_similarity(
                     models=models,
                     images=images,
@@ -506,28 +429,7 @@ def run_segmentation_visualization(
         weights: str = '',
         seed: int = 42
 ) -> None:
-    """
-    Run segmentation comparison visualization for trained models.
-
-    Creates:
-    - Segmentation map comparison (raw predictions)
-    - Overlay comparison (predictions overlaid on images)
-
-    Args:
-        dataset_name: Name of the dataset ("deepglobe" or "coralscapes")
-        data_root: Path to data directory
-        output_dir: Path to output directory
-        device: Device for computation
-        num_samples: Number of samples to visualize
-        image_size: Image size used during training
-        overlay: Whether to create overlay visualizations
-        overlay_alpha: Alpha value for overlay transparency
-        model_no_lora_path: Path to model trained without LoRA checkpoint
-        model_lora_path: Path to model trained with LoRA checkpoint
-        repo_dir: Path to DINOv3 repository directory
-        weights: Path to frozen backbone weights
-        seed: Random seed for reproducible sample selection
-    """
+    """Plot the segmentation maps of the models trained with and without LoRA on sample images."""
     torch.manual_seed(seed)
 
     output_dir = Path(output_dir) / f"{dataset_name}_segmentation"
@@ -537,7 +439,6 @@ def run_segmentation_visualization(
     print(f"Running Segmentation Visualization for {dataset_name}")
     print(f"{'=' * 60}\n")
 
-    # Get dataset info and create dataloader
     if dataset_name == "deepglobe":
         eval_transform = get_deepglobe_transforms(image_size, is_train=False)
         dataset = DeepGlobeDataset(
@@ -560,14 +461,11 @@ def run_segmentation_visualization(
         print(f"Segmentation visualization not supported for {dataset_name}")
         return
 
-    # Create dataloader
     dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=0)
 
-    # Load models from provided paths
     models = {}
     exp_config = EXPERIMENTS[dataset_name]
 
-    # Load model trained without LoRA if path provided
     if model_no_lora_path and Path(model_no_lora_path).exists():
         print(f"Loading model without LoRA from {model_no_lora_path}...")
         model_no_lora = create_model(
@@ -586,7 +484,6 @@ def run_segmentation_visualization(
     elif model_no_lora_path:
         print(f"Warning: Model without LoRA path provided but not found: {model_no_lora_path}")
 
-    # Load model trained with LoRA if path provided
     if model_lora_path and Path(model_lora_path).exists():
         print(f"Loading model with LoRA from {model_lora_path}...")
         lora_config = {
@@ -601,7 +498,7 @@ def run_segmentation_visualization(
             freeze_backbone=True,
             num_classes=exp_config["num_classes"],
             use_lora=True,
-            lora_config=lora_config,  # LoRA config will be loaded from state dict
+            lora_config=lora_config,
             device=device,
             weights=weights,
             repo_dir=repo_dir
@@ -616,7 +513,6 @@ def run_segmentation_visualization(
         print("No models loaded. Provide at least one model path.")
         return
 
-    # Move models to device and set to eval
     for model in models.values():
         model.to(device)
         model.eval()
@@ -624,7 +520,6 @@ def run_segmentation_visualization(
     print(f"Comparing {len(models)} models: {list(models.keys())}")
     print(f"Using {num_samples} samples from {dataset_name}")
 
-    # Segmentation map comparison
     print("\nGenerating segmentation map comparison...")
     figs = compare_segmentation_maps(
         models=models,
@@ -656,40 +551,17 @@ def run_all_segmentation_visualizations(
         weights: str = '',
         seed: int = 42
 ) -> None:
-    """
-    Load trained segmentation models and run comparison visualizations.
-
-    Looks for saved checkpoints in results_dir and compares:
-    - Frozen DINOv3 backbone
-    - Model trained without LoRA
-    - Model trained with LoRA
-
-    For each of 3 datasets (patchcamelyon, deepglobe, coralscapes), there are 2 models:
-    - without LoRA
-    - with LoRA
-
-    Args:
-        trained_models_dir: Directory containing trained model checkpoints
-        data_root: Path to data directory
-        output_dir: Path to output directory
-        device: Device for computation
-        num_samples: Number of samples to visualize
-        overlay: Whether to create overlay visualizations
-        overlay_alpha: Alpha value for overlay transparency
-        repo_dir: Path to DINOv3 repository directory
-        weights: Path to frozen backbone weights
-        seed: Random seed for reproducible sample selection
-    """
+    """Compare the segmentation maps of the trained Coralscapes and DeepGlobe models."""
     print(f"\n{'=' * 60}")
     print("Running All Segmentation Visualizations")
     print(f"{'=' * 60}\n")
 
     common_end = 'checkpoint_best.pt'
     trained_models_paths = [
-        f'{trained_models_dir}/coralscapes_dinov3_20251229_120012/{common_end}',  # coralscapes without LoRA
-        f'{trained_models_dir}/coralscapes_dinov3_lora_20251229_205434/{common_end}',  # coralscapes with LoRA
-        f'{trained_models_dir}/deepglobe_dinov3_20251229_224252/{common_end}',  # deepglobe without LoRA
-        f'{trained_models_dir}/deepglobe_dinov3_lora_20251230_003334/{common_end}',  # deepglobe with LoRA
+        f'{trained_models_dir}/coralscapes_dinov3_20251229_120012/{common_end}',
+        f'{trained_models_dir}/coralscapes_dinov3_lora_20251229_205434/{common_end}',
+        f'{trained_models_dir}/deepglobe_dinov3_20251229_224252/{common_end}',
+        f'{trained_models_dir}/deepglobe_dinov3_lora_20251230_003334/{common_end}',
     ]
 
     segmentation_datasets = ["coralscapes", "deepglobe"]
@@ -718,10 +590,6 @@ def run_all_segmentation_visualizations(
 
     print(f"\nAll segmentation visualizations complete.")
 
-
-# ====================
-# CLI Interface
-# ====================
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -1016,11 +884,9 @@ def main():
         )
 
     elif args.action == "all":
-        # Download datasets
         print("\n[1/3] Downloading datasets...")
         download_all_datasets(args.data_root)
 
-        # Run all training experiments
         print("\n[2/3] Running training experiments...")
         run_all_experiments(
             data_root=args.data_root,
@@ -1038,7 +904,6 @@ def main():
             repo_dir=args.repo_dir,
         )
 
-        # Run visualizations
         print("\n[3/3] Running feature and segmentation visualizations...")
         import matplotlib.pyplot as plt
         run_feature_visualization(

@@ -1,8 +1,4 @@
-"""
-Training Module
-===============
-Training loops, loss functions, and evaluation metrics
-"""
+"""Training loop, loss functions, and evaluation metrics."""
 
 import json
 from dataclasses import dataclass, asdict
@@ -24,13 +20,8 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 
-# ============
-# Metrics
-# ============
-
 @dataclass
 class ClassificationMetrics:
-    """Metrics for classification tasks"""
     accuracy: float
     f1_macro: float
     f1_weighted: float
@@ -43,7 +34,6 @@ class ClassificationMetrics:
 
 @dataclass
 class SegmentationMetrics:
-    """Metrics for segmentation tasks"""
     mean_iou: float
     class_iou: Dict[int, float]
     mean_dice: float
@@ -58,7 +48,6 @@ def compute_classification_metrics(
         predictions: np.ndarray,
         targets: np.ndarray,
 ) -> ClassificationMetrics:
-    """Compute classification metrics"""
     return ClassificationMetrics(
         accuracy=accuracy_score(targets, predictions),
         f1_macro=f1_score(targets, predictions, average='macro', zero_division=0),
@@ -74,15 +63,11 @@ def compute_segmentation_metrics(
         num_classes: int,
         ignore_index: int = 255,
 ) -> SegmentationMetrics:
-    """Compute segmentation metrics"""
-    # Flatten
     pred_flat = predictions.flatten()
     target_flat = targets.flatten()
 
-    # Pixel accuracy
     pixel_accuracy = (pred_flat == target_flat).mean()
 
-    # Per-class IoU and Dice
     class_iou = {}
     class_dice = {}
 
@@ -98,11 +83,9 @@ def compute_segmentation_metrics(
             intersection = (pred_cls & target_cls).sum()
             union = (pred_cls | target_cls).sum()
 
-            # IoU
             iou = intersection / union
             class_iou[cls] = float(iou)
 
-            # Dice
             dice = 2 * intersection / (pred_sum + target_sum)
             class_dice[cls] = float(dice)
 
@@ -118,81 +101,59 @@ def compute_segmentation_metrics(
     )
 
 
-# ===================
-# Loss Functions
-# ===================
-
 class JaccardLoss(nn.Module):
-    """Jaccard Loss (IoU Loss) for segmentation"""
-
     def __init__(self, smooth: float = 1.0, ignore_index: int = 255):
         super().__init__()
         self.smooth = smooth
         self.ignore_index = ignore_index
 
     def forward(self, inputs: Tensor, targets: Tensor) -> Tensor:
-        """
-        Args:
-            inputs: [B, C, H, W] logits
-            targets: [B, H, W] class indices
-        """
+        """Take [B, C, H, W] logits and [B, H, W] class indices."""
         num_classes = inputs.shape[1]
 
-        # Softmax
         probs = F.softmax(inputs, dim=1)
 
-        # One-hot encode targets
         targets_onehot = F.one_hot(
             targets, num_classes
         ).permute(0, 3, 1, 2).float()
 
-        # Compute Jaccard (IoU)
         intersection = (probs * targets_onehot).sum(dim=(2, 3))
         sum_probs_targets = probs.sum(dim=(2, 3)) + targets_onehot.sum(dim=(2, 3))
         union = sum_probs_targets - intersection
 
         iou = (intersection + self.smooth) / (union + self.smooth)
-        iou_per_class = iou.mean(dim=0)  # mean over batch
+        iou_per_class = iou.mean(dim=0)
 
-        return 1 - iou_per_class.mean()  # mean over classes
+        return 1 - iou_per_class.mean()
 
 
 class DiceLoss(nn.Module):
-    """Dice Loss for segmentation"""
-
     def __init__(self, smooth: float = 1.0, ignore_index: int = 255):
         super().__init__()
         self.smooth = smooth
         self.ignore_index = ignore_index
 
     def forward(self, inputs: Tensor, targets: Tensor) -> Tensor:
-        """
-        Args:
-            inputs: [B, C, H, W] logits
-            targets: [B, H, W] class indices
-        """
+        """Take [B, C, H, W] logits and [B, H, W] class indices."""
         num_classes = inputs.shape[1]
 
-        # Softmax
         probs = F.softmax(inputs, dim=1)
 
-        # One-hot encode targets
         targets_onehot = F.one_hot(
-            targets, num_classes  # clamp(0, num_classes - 1)
+            targets, num_classes
         ).permute(0, 3, 1, 2).float()
 
-        # Compute Dice
         intersection = (probs * targets_onehot).sum(dim=(2, 3))
         sum_probs_targets = probs.sum(dim=(2, 3)) + targets_onehot.sum(dim=(2, 3))
 
         dice = (2 * intersection + self.smooth) / (sum_probs_targets + self.smooth)
-        dice_per_class = dice.mean(dim=0)  # mean over batch
+        dice_per_class = dice.mean(dim=0)
 
-        return 1 - dice_per_class.mean()  # mean over classes
+        return 1 - dice_per_class.mean()
 
 
 class SegmentationLoss(nn.Module):
-    """Combined loss for segmentation"""
+    """Weighted sum of the cross-entropy, Jaccard, and Dice losses."""
 
     def __init__(
             self,
@@ -218,12 +179,8 @@ class SegmentationLoss(nn.Module):
         return metric_based_loss + self.ce_weight * self.ce_loss(inputs, targets)
 
 
-# ======================
-# Training Loop
-# ======================
-
 class Trainer:
-    """Unified trainer for all tasks"""
+    """Unified trainer for all tasks."""
 
     def __init__(
             self,
@@ -262,14 +219,12 @@ class Trainer:
         self.use_lora = use_lora
         self.learning_rate = learning_rate
 
-        # Setup loss function
         if task == "classification":
             if num_classes == 2:
                 # Binary classification: BCEWithLogitsLoss for single logit output
                 self.criterion = nn.BCEWithLogitsLoss()
                 self.is_binary_classification = True
             else:
-                # Multi-class classification: CrossEntropyLoss
                 self.criterion = nn.CrossEntropyLoss()
                 self.is_binary_classification = False
         elif task == "segmentation":
@@ -281,9 +236,7 @@ class Trainer:
         else:
             raise ValueError(f"Unknown task: {task}")
 
-        # Setup optimizer
         if use_lora:
-            # Separate parameter groups for LoRA and head
             lora_params = []
             head_params = []
             for name, param in model.named_parameters():
@@ -299,11 +252,9 @@ class Trainer:
             ]
             self.optimizer = AdamW(param_groups, weight_decay=weight_decay)
         else:
-            # Only train head parameters
             trainable_params = [p for p in model.parameters() if p.requires_grad]
             self.optimizer = AdamW(trainable_params, lr=learning_rate, weight_decay=weight_decay)
 
-        # Setup step-based scheduler
         steps_per_epoch = len(train_loader)
         total_steps = self.max_epochs * steps_per_epoch
         warmup_steps = int(warmup_ratio * total_steps)
@@ -321,12 +272,10 @@ class Trainer:
 
         print(f"Scheduler setup: {steps_per_epoch} steps/epoch, {total_steps} total steps, {warmup_steps} warmup steps")
 
-        # Early stopping
         self.early_stopping_patience = early_stopping_patience
         self.early_stopping_min_delta = early_stopping_min_delta
         self.epochs_without_improvement = 0
 
-        # History
         self.history = {
             'train_loss': [],
             'val_loss': [],
@@ -337,7 +286,6 @@ class Trainer:
         self.best_epoch = 0
 
     def train_epoch(self, epoch: int) -> float:
-        """Train for one epoch"""
         self.model.train()
         total_loss = 0.0
         num_batches = 0
@@ -350,7 +298,6 @@ class Trainer:
             self.optimizer.zero_grad()
             outputs = self.model(images)
 
-            # Handle binary classification target shape
             if self.task == "classification" and self.is_binary_classification:
                 # BCEWithLogitsLoss expects targets of the same shape as outputs
                 # outputs: [B, 1], targets: [B] -> targets: [B, 1]
@@ -359,11 +306,10 @@ class Trainer:
             loss = self.criterion(outputs, targets)
             loss.backward()
 
-            # Gradient clipping
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
 
             self.optimizer.step()
-            self.scheduler.step()  # Step-based scheduler update
+            self.scheduler.step()
 
             total_loss += loss.item()
             num_batches += 1
@@ -374,7 +320,6 @@ class Trainer:
 
     @torch.no_grad()
     def evaluate(self, loader: DataLoader, desc: str = "Eval") -> Tuple[float, Any]:
-        """Evaluate on a dataset"""
         self.model.eval()
         total_loss = 0.0
         num_batches = 0
@@ -390,7 +335,6 @@ class Trainer:
 
             outputs = self.model(images)
 
-            # Compute loss
             if self.task == "classification" and self.is_binary_classification:
                 loss = self.criterion(outputs, targets.float().unsqueeze(1))
             else:
@@ -399,15 +343,12 @@ class Trainer:
             total_loss += loss.item()
             num_batches += 1
 
-            # Collect predictions
             if self.task == "classification":
                 if self.is_binary_classification:
-                    # Binary: sigmoid then threshold at 0.5
                     probs = torch.sigmoid(outputs).squeeze(1)  # [B]
                     preds = (probs > 0.5).long().cpu().numpy()
                     all_probabilities.append(probs.cpu().numpy())
                 else:
-                    # Multi-class: argmax
                     preds = outputs.argmax(dim=1).cpu().numpy()
             elif self.task == "segmentation":
                 preds = outputs.argmax(dim=1).cpu().numpy()
@@ -417,14 +358,11 @@ class Trainer:
 
         avg_loss = total_loss / num_batches
 
-        # Concatenate all predictions and targets
         all_predictions = np.concatenate(all_predictions, axis=0)
         all_targets = np.concatenate(all_targets, axis=0)
 
-        # Compute metrics
         if self.task == "classification":
             metrics = compute_classification_metrics(all_predictions, all_targets)
-            # Add AUC for binary classification
             if self.is_binary_classification and len(all_probabilities) > 0:
                 all_probabilities = np.concatenate(all_probabilities, axis=0)
                 try:
@@ -440,14 +378,13 @@ class Trainer:
         return avg_loss, metrics
 
     def get_primary_metric(self, metrics: Any) -> float:
-        """Get the primary metric for model selection"""
+        """Get the primary metric for model selection."""
         if self.task == "classification":
             return metrics.f1_macro
         elif self.task == "segmentation":
             return metrics.mean_iou
 
     def save_checkpoint(self, epoch: int, is_best: bool = False):
-        """Save model checkpoint"""
         checkpoint = {
             'epoch': epoch,
             'model_state_dict': self.model.state_dict(),
@@ -459,54 +396,37 @@ class Trainer:
             'epochs_without_improvement': self.epochs_without_improvement,
         }
 
-        # Save latest
         torch.save(checkpoint, self.output_dir / 'checkpoint_latest.pt')
 
-        # Save best
         if is_best:
             torch.save(checkpoint, self.output_dir / 'checkpoint_best.pt')
 
     def load_checkpoint(self, checkpoint_path: Path) -> int:
-        """
-        Load model checkpoint and restore training state
-
-        Args:
-            checkpoint_path: Path to checkpoint file
-
-        Returns:
-            The epoch number to resume from (saved_epoch + 1)
-        """
+        """Restore the model and training state from a checkpoint and return the epoch to resume from."""
         print(f"Loading checkpoint from: {checkpoint_path}")
         checkpoint = torch.load(checkpoint_path, map_location=self.device)
 
-        # Restore model and optimizer states
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
-        # Restore training state
         self.history = checkpoint['history']
         self.best_metric = checkpoint['best_metric']
         self.best_epoch = checkpoint.get('best_epoch', None)
         self.epochs_without_improvement = checkpoint.get('epochs_without_improvement', None)
 
-        # If not available, try to load from best checkpoint
         if self.best_epoch is None or self.epochs_without_improvement is None:
-            # Try to construct best checkpoint path
             best_checkpoint_path = checkpoint_path.parent / 'checkpoint_best.pt'
 
             if best_checkpoint_path.exists():
                 print(f"Loading best checkpoint to retrieve missing metadata from: {best_checkpoint_path}")
                 best_checkpoint = torch.load(best_checkpoint_path, map_location=self.device)
 
-                # Get best_epoch from best checkpoint
                 self.best_epoch = best_checkpoint['epoch']
 
-                # Infer epochs_without_improvement
                 current_epoch = checkpoint['epoch']
                 self.epochs_without_improvement = current_epoch - self.best_epoch
             else:
-                # Fallback to defaults
                 print("Best checkpoint not found, defaulting best_epoch and epochs_without_improvement to 0")
                 self.best_epoch = 0
                 self.epochs_without_improvement = 0
@@ -518,7 +438,6 @@ class Trainer:
         return start_epoch
 
     def train(self) -> Dict:
-        """Full training loop"""
         print(f"\n{'=' * 60}")
         print(f"Training {self.task} model")
         print(f"{'=' * 60}")
@@ -536,16 +455,13 @@ class Trainer:
         print(f"{'=' * 60}\n")
 
         for epoch in range(self.epochs):
-            # Train
             train_loss = self.train_epoch(epoch)
 
-            # Evaluate on validation set
             val_loss, val_metrics = self.evaluate(self.val_loader, "Val")
 
-            # Get primary metric (scheduler is updated per-step in train_epoch)
+            # The scheduler is updated per step, in train_epoch
             primary_metric = self.get_primary_metric(val_metrics)
 
-            # Check if best (with min_delta)
             is_best = primary_metric >= self.best_metric + self.early_stopping_min_delta
             if is_best:
                 self.best_metric = primary_metric
@@ -554,15 +470,12 @@ class Trainer:
             else:
                 self.epochs_without_improvement += 1
 
-            # Save checkpoint
             self.save_checkpoint(epoch, is_best)
 
-            # Update history
             self.history['train_loss'].append(train_loss)
             self.history['val_loss'].append(val_loss)
             self.history['val_metrics'].append(val_metrics.to_dict())
 
-            # Print progress
             print(f"\nEpoch {epoch + 1}/{self.epochs}")
             print(f"  Train Loss: {train_loss:.4f}")
             print(f"  Val Loss: {val_loss:.4f}")
@@ -572,7 +485,6 @@ class Trainer:
             if is_best:
                 print(f"  [NEW BEST]")
 
-            # Early stopping check
             if self.epochs_without_improvement >= self.early_stopping_patience:
                 print(f"\n{'=' * 60}")
                 print(f"Early stopping triggered after {epoch + 1} epochs")
@@ -581,13 +493,11 @@ class Trainer:
                 print(f"{'=' * 60}")
                 break
 
-        # Final evaluation on test set
         if self.test_loader:
             print(f"\n{'=' * 60}")
             print("Final Test Evaluation")
             print(f"{'=' * 60}")
 
-            # Load best model
             best_checkpoint = torch.load(self.output_dir / 'checkpoint_best.pt')
             self.model.load_state_dict(best_checkpoint['model_state_dict'])
 
@@ -596,11 +506,9 @@ class Trainer:
 
             print(f"Test Loss: {test_loss:.4f}")
             metrics_dict = test_metrics.to_dict()
-            # Format metrics including nested dictionaries
             metrics_parts = []
             for k, v in metrics_dict.items():
                 if isinstance(v, dict):
-                    # Format nested dictionary
                     nested_str = "{" + ", ".join([f"{nk}: {nv:.2f}" for nk, nv in v.items()]) + "}"
                     metrics_parts.append(f"{k}: {nested_str}")
                 elif isinstance(v, (int, float)):
@@ -608,27 +516,15 @@ class Trainer:
             metrics_str = ", ".join(metrics_parts)
             print(f"Test Metrics: {metrics_str}")
 
-        # Save final history
         with open(self.output_dir / 'history.json', 'w') as f:
             json.dump(self.history, f, indent=2)
 
         return self.history
 
     def resume_training(self, checkpoint_path: Path, total_epochs: int) -> Dict:
-        """
-        Resume training from a checkpoint
-
-        Args:
-            checkpoint_path: Path to checkpoint file to resume from
-            total_epochs: Total number of epochs to train for (including already completed epochs)
-
-        Returns:
-            Training history dictionary
-        """
-        # Load checkpoint and get starting epoch
+        """Resume training from a checkpoint; total_epochs counts the epochs already completed."""
         start_epoch = self.load_checkpoint(checkpoint_path)
 
-        # Update epochs to reflect the total target
         remaining_epochs = total_epochs - start_epoch
         if remaining_epochs <= 0:
             print(f"\n{'=' * 60}")
@@ -652,21 +548,16 @@ class Trainer:
             print(f"Number of test samples: {len(self.test_loader.dataset)}")
         print(f"{'=' * 60}\n")
 
-        # Update self.epochs to reflect total target
         self.epochs = total_epochs
 
-        # Training loop (same as train method)
+        # Same loop as in train()
         for epoch in range(start_epoch, total_epochs):
-            # Train
             train_loss = self.train_epoch(epoch)
 
-            # Evaluate on validation set
             val_loss, val_metrics = self.evaluate(self.val_loader, "Val")
 
-            # Get primary metric
             primary_metric = self.get_primary_metric(val_metrics)
 
-            # Check if best
             is_best = primary_metric >= self.best_metric + self.early_stopping_min_delta
             if is_best:
                 self.best_metric = primary_metric
@@ -675,15 +566,12 @@ class Trainer:
             else:
                 self.epochs_without_improvement += 1
 
-            # Save checkpoint
             self.save_checkpoint(epoch, is_best)
 
-            # Update history
             self.history['train_loss'].append(train_loss)
             self.history['val_loss'].append(val_loss)
             self.history['val_metrics'].append(val_metrics.to_dict())
 
-            # Print progress
             print(f"\nEpoch {epoch + 1}/{self.epochs}")
             print(f"  Train Loss: {train_loss:.4f}")
             print(f"  Val Loss: {val_loss:.4f}")
@@ -693,7 +581,6 @@ class Trainer:
             if is_best:
                 print(f"  [NEW BEST]")
 
-            # Early stopping check
             if self.epochs_without_improvement >= self.early_stopping_patience:
                 print(f"\n{'=' * 60}")
                 print(f"Early stopping triggered after {epoch + 1} epochs")
@@ -702,13 +589,11 @@ class Trainer:
                 print(f"{'=' * 60}")
                 break
 
-        # Final evaluation on test set
         if self.test_loader:
             print(f"\n{'=' * 60}")
             print("Final Test Evaluation")
             print(f"{'=' * 60}")
 
-            # Load best model
             best_checkpoint = torch.load(self.output_dir / 'checkpoint_best.pt')
             self.model.load_state_dict(best_checkpoint['model_state_dict'])
 
@@ -717,11 +602,9 @@ class Trainer:
 
             print(f"Test Loss: {test_loss:.4f}")
             metrics_dict = test_metrics.to_dict()
-            # Format metrics including nested dictionaries
             metrics_parts = []
             for k, v in metrics_dict.items():
                 if isinstance(v, dict):
-                    # Format nested dictionary
                     nested_str = "{" + ", ".join([f"{nk}: {nv:.2f}" for nk, nv in v.items()]) + "}"
                     metrics_parts.append(f"{k}: {nested_str}")
                 elif isinstance(v, (int, float)):
@@ -729,7 +612,6 @@ class Trainer:
             metrics_str = ", ".join(metrics_parts)
             print(f"Test Metrics: {metrics_str}")
 
-        # Save final history
         with open(self.output_dir / 'history.json', 'w') as f:
             json.dump(self.history, f, indent=2)
 
@@ -737,16 +619,13 @@ class Trainer:
 
 
 if __name__ == "__main__":
-    # Test metrics computation
     print("Testing metrics computation...")
 
-    # Classification
     preds = np.array([0, 1, 1, 0, 1])
     targets = np.array([0, 1, 0, 0, 1])
     metrics = compute_classification_metrics(preds, targets)
     print(f"Classification metrics: {metrics.to_dict()}")
 
-    # Segmentation
     preds = np.random.randint(0, 7, (2, 32, 32))
     targets = np.random.randint(0, 7, (2, 32, 32))
     metrics = compute_segmentation_metrics(preds, targets, num_classes=7)
